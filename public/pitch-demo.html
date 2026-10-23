@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pitch Detector</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom styles for specific effects not easily done with standard Tailwind utilities */
+        
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap');
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0f111a; /* Dark background */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            color: #d1d5db; /* Tailwind gray-300 */
+        }
+
+        .app-window {
+            background-color: #1a1d26;
+            border-radius: 12px;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+            width: 1000px;
+            max-width: 95vw;
+            height: auto;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            border: 1px solid #2d3240;
+        }
+
+        /* Top Bar */
+        .title-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 24px;
+            background: linear-gradient(to bottom, #232733, #1a1d26);
+            border-bottom: 1px solid #2d3240;
+        }
+
+        /* Main Content Area */
+        .main-content {
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            flex: 1;
+        }
+
+        /* Chart Container */
+        .chart-container-wrapper {
+            position: relative;
+            background-color: #14171f;
+            border-radius: 8px;
+            padding: 20px 20px 20px 10px; /* Less left padding for labels */
+            display: flex;
+        }
+
+        .chart-box {
+            position: relative;
+            flex-grow: 1;
+            border: 2px solid #3b82f6; /* Blue border */
+            border-radius: 8px;
+            box-shadow: 0 0 15px rgba(59, 130, 246, 0.4), inset 0 0 10px rgba(59, 130, 246, 0.2);
+            overflow: hidden; /* Keep graph inside */
+            height: 400px;
+            display: flex;
+        }
+
+        /* Grid Background */
+        .grid-bg {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-size: 40px 40px; /* Adjust grid size */
+            background-image: 
+                linear-gradient(to right, #2d3240 1px, transparent 1px),
+                linear-gradient(to bottom, #2d3240 1px, transparent 1px);
+            opacity: 0.5;
+            z-index: 1;
+        }
+
+        /* Y-Axis Labels */
+        .y-axis {
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding-right: 10px;
+            color: #9ca3af; /* gray-400 */
+            font-size: 12px;
+            text-align: right;
+            z-index: 2;
+            padding-top: 10px;
+            padding-bottom: 10px;
+            height: calc(100% - 20px);
+        }
+        
+        .y-axis-tick {
+            position: relative;
+            height: 1px; /* Just a placeholder for spacing */
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+        }
+        
+        .y-axis-tick::after {
+             content: '';
+             position: absolute;
+             right: -10px; /* Draw small line pointing to the box */
+             width: 6px;
+             height: 1px;
+             background-color: #9ca3af;
+        }
+
+        /* The Graph Line */
+        .svg-graph {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 2;
+        }
+
+        .graph-line {
+            fill: none;
+            stroke: #4ade80; /* Neon green */
+            stroke-width: 4;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+            filter: drop-shadow(0 0 8px #4ade80);
+        }
+        
+        .graph-fill {
+            fill: url(#fadeGradient);
+            opacity: 0.3;
+        }
+
+        /* Current Pitch Card */
+        .current-pitch-card {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(30, 34, 45, 0.6);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 16px 24px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 10;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06), inset 0 1px 0 rgba(255,255,255,0.1);
+        }
+
+        .pitch-label {
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #9ca3af;
+            margin-bottom: 4px;
+        }
+
+        .pitch-value {
+            font-size: 56px;
+            font-weight: 700;
+            color: #a7f3d0; /* Light green tint for text */
+            text-shadow: 0 0 20px rgba(74, 222, 128, 0.8), 0 0 10px rgba(255, 255, 255, 0.4);
+            line-height: 1;
+            display: flex;
+            align-items: baseline;
+        }
+
+        .pitch-sub {
+            font-size: 32px;
+            font-weight: 600;
+            margin-left: 2px;
+        }
+
+        /* Custom Sliders */
+        input[type=range] {
+            -webkit-appearance: none; /* Hides the slider so that custom slider can be made */
+            width: 100%; /* Specific width is required for Firefox. */
+            background: transparent; /* Otherwise white in Chrome */
+        }
+        
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 16px;
+            width: 16px;
+            border-radius: 50%;
+            background: #d1d5db;
+            cursor: pointer;
+            margin-top: -6px; /* You need to specify a margin in Chrome, but in Firefox and IE it is automatic */
+        }
+        
+        input[type=range]::-webkit-slider-runnable-track {
+            width: 100%;
+            height: 4px;
+            cursor: pointer;
+            background: #374151;
+            border-radius: 2px;
+        }
+        
+        /* Simulating the filled part of the track */
+        .slider-container {
+            position: relative;
+            width: 200px;
+            display: flex;
+            align-items: center;
+        }
+        
+        .slider-fill {
+            position: absolute;
+            left: 0;
+            height: 4px;
+            background-color: #3b82f6;
+            border-radius: 2px;
+            pointer-events: none;
+            z-index: 1;
+        }
+        
+        .custom-slider {
+            position: relative;
+            z-index: 2;
+        }
+
+        /* Footer */
+        .app-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 24px;
+            background-color: #1a1d26;
+            border-top: 1px solid #2d3240;
+        }
+
+        .btn {
+            background-color: #374151;
+            color: #d1d5db;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+
+        .btn:hover {
+            background-color: #4b5563;
+        }
+        
+        .btn-primary {
+            background-color: #2563eb;
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background-color: #1d4ed8;
+        }
+
+        .freq-display {
+            background-color: #2d3240;
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-family: monospace;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="app-window">
+    
+    <!-- Top Title Bar -->
+    <div class="title-bar">
+        <div class="flex gap-2">
+            <!-- Mac style window buttons -->
+            <div class="w-3 h-3 rounded-full bg-red-500 hover:bg-red-600 cursor-pointer"></div>
+            <div class="w-3 h-3 rounded-full bg-yellow-500 hover:bg-yellow-600 cursor-pointer"></div>
+            <div class="w-3 h-3 rounded-full bg-green-500 hover:bg-green-600 cursor-pointer"></div>
+        </div>
+        <h1 class="text-xl font-semibold text-gray-200 tracking-wide">Pitch Detector</h1>
+        <div class="flex gap-4 text-gray-400">
+            <!-- Mock Windows style icons -->
+            <svg class="w-4 h-4 cursor-pointer hover:text-gray-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 12H6"></path></svg>
+            <svg class="w-4 h-4 cursor-pointer hover:text-gray-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"></path></svg>
+            <svg class="w-4 h-4 cursor-pointer hover:text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+        </div>
+    </div>
+
+    <!-- Main Content Area -->
+    <div class="main-content">
+        
+        <!-- Chart Wrapper -->
+        <div class="chart-container-wrapper">
+            
+            <div class="y-axis pr-4">
+                <div class="y-axis-tick">G4</div>
+                <div class="y-axis-tick">F#4</div>
+                <div class="y-axis-tick">F4</div>
+                <div class="y-axis-tick">E4</div>
+                <div class="y-axis-tick">D#4</div>
+                <div class="y-axis-tick">D4</div>
+                <div class="y-axis-tick">C#4</div>
+                <div class="y-axis-tick">C4</div>
+                <div class="y-axis-tick">B3</div>
+                <div class="y-axis-tick">A#3</div>
+                <div class="y-axis-tick">A3</div>
+                <div class="y-axis-tick">G#3</div>
+                <div class="y-axis-tick">G3</div>
+            </div>
+
+            <div class="chart-box">
+                <div class="grid-bg"></div>
+                
+                <!-- Current Pitch Overlay Card -->
+                <div class="current-pitch-card">
+                    <div class="pitch-label">CURRENT PITCH</div>
+                    <div class="pitch-value">
+                        A<span class="pitch-sub">4</span>
+                    </div>
+                </div>
+
+                <!-- SVG Graph Line mimicking the screenshot -->
+                <svg class="svg-graph" preserveAspectRatio="none" viewBox="0 0 1000 400">
+                    <defs>
+                        <linearGradient id="fadeGradient" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stop-color="#4ade80" stop-opacity="0.8" />
+                            <stop offset="100%" stop-color="#4ade80" stop-opacity="0" />
+                        </linearGradient>
+                    </defs>
+                    <!-- Path data roughly traced from the image curve -->
+                    <path class="graph-fill" d="M50,400 L50,100 L80,320 Q120,220 150,250 T200,260 Q230,260 250,150 Q280,140 300,170 T350,160 T400,170 T450,160 L480,120 L520,270 L580,150 Q600,140 620,160 T660,150 T680,155 L680,400 Z" />
+                    <path class="graph-line" d="M50,100 L80,320 Q120,220 150,250 T200,260 Q230,260 250,150 Q280,140 300,170 T350,160 T400,170 T450,160 L480,120 L520,270 L580,150 Q600,140 620,160 T660,150 T680,155" />
+                </svg>
+            </div>
+        </div>
+
+        <!-- Middle Controls (Optional text as in some parts of image) -->
+        <div class="flex justify-between items-center px-4 mt-2">
+           <div class="text-sm text-gray-400">Sensitivitas mikrofon (normal)</div>
+           <div class="text-sm text-gray-400">Frekuensi: 440 Hz</div>
+        </div>
+    </div>
+
+    <div class="app-footer">
+        <div class="flex gap-3">
+            <button class="btn btn-primary">Start/Pause</button>
+            <button class="btn">Reset</button>
+        </div>
+
+        <div class="flex items-center gap-4">
+            <span class="text-sm text-gray-400">Sensitivitas mikrofon:</span>
+            
+            <!-- Custom Slider Layout -->
+            <div class="slider-container" style="width: 150px;">
+                <div class="slider-fill" style="width: 30%;"></div>
+                <input type="range" min="1" max="100" value="30" class="custom-slider w-full">
+            </div>
+            
+            <span class="text-sm text-gray-400">30%</span>
+            <span class="text-sm text-gray-400 ml-2">High</span>
+        </div>
+
+        <div class="freq-display">
+            440 Hz
+        </div>
+    </div>
+
+</div>
+
+<script>
+    // Simple script to update slider fill visual (no audio logic yet)
+    document.addEventListener('DOMContentLoaded', () => {
+        const sliders = document.querySelectorAll('input[type="range"]');
+        
+        sliders.forEach(slider => {
+            slider.addEventListener('input', (e) => {
+                const val = e.target.value;
+                const min = e.target.min ? e.target.min : 0;
+                const max = e.target.max ? e.target.max : 100;
+                const percentage = ((val - min) / (max - min)) * 100;
+                
+                const container = e.target.parentElement;
+                const fill = container.querySelector('.slider-fill');
+                if(fill) fill.style.width = percentage + '%';
+                
+                const percentDisplay = container.nextElementSibling;
+                if(percentDisplay && percentDisplay.textContent.includes('%')) {
+                    percentDisplay.textContent = val + '%';
+                }
+            });
+        });
+    });
+</script>
+
+</body>
+</html>

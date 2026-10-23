@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vocal Pitch & Chord Matcher</title>
+    <!-- Menggunakan Tailwind CSS untuk Styling Cepat -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background-color: #0f172a; color: white; }
+        canvas { filter: drop-shadow(0 0 8px rgba(56, 189, 248, 0.5)); }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col items-center p-6 font-sans">
+
+    <!-- Header & Controls -->
+    <div class="w-full max-w-5xl flex justify-between items-center mb-6">
+        <h1 class="text-3xl font-bold text-gray-100">🎤 Vocal Pitch & Chord Matcher</h1>
+        
+        <div class="flex gap-4 items-center">
+            <select id="chordSelect" class="bg-gray-800 border border-gray-600 text-white text-sm rounded-lg p-2.5 outline-none focus:ring-2 focus:ring-blue-500">
+                <option value="C">Target Chord: C Major (C, E, G)</option>
+                <option value="G">Target Chord: G Major (G, B, D)</option>
+                <option value="Am">Target Chord: A Minor (A, C, E)</option>
+                <option value="F">Target Chord: F Major (F, A, C)</option>
+            </select>
+            
+            <button id="startBtn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded-lg shadow-lg transition-all">
+                START MIC
+            </button>
+        </div>
+    </div>
+
+    <!-- Canvas Visualization Area -->
+    <div class="w-full max-w-5xl bg-gray-900 border border-gray-700 rounded-xl shadow-2xl overflow-hidden relative">
+        <canvas id="pitchCanvas" width="1000" height="400" class="w-full h-96"></canvas>
+    </div>
+
+    <!-- Current Note Display -->
+    <div class="mt-8 text-center bg-gray-800 px-12 py-6 rounded-2xl border border-gray-700 shadow-xl">
+        <p class="text-gray-400 text-sm font-semibold tracking-widest uppercase mb-1">Current Note</p>
+        <h2 id="noteDisplay" class="text-6xl font-extrabold text-green-400">--</h2>
+        <p id="hzDisplay" class="text-gray-500 text-sm mt-2">0 Hz</p>
+    </div>
+
+    <script>
+        // === KONFIGURASI NADA & CHORD ===
+        const notes = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+        const chords = {
+            'C': [0, 4, 7],     // C, E, G
+            'G': [7, 11, 2],    // G, B, D
+            'Am': [9, 0, 4],    // A, C, E
+            'F': [5, 9, 0]      // F, A, C
+        };
+
+        // === VARIABEL GLOBAL ===
+        let audioContext, analyser, microphone;
+        let isRecording = false;
+        let pitchHistory = new Array(100).fill(null); // Menyimpan jejak grafik
+        
+        // Element DOM
+        const canvas = document.getElementById('pitchCanvas');
+        const ctx = canvas.getContext('2d');
+        const startBtn = document.getElementById('startBtn');
+        const noteDisplay = document.getElementById('noteDisplay');
+        const hzDisplay = document.getElementById('hzDisplay');
+        const chordSelect = document.getElementById('chordSelect');
+
+        // === RUMUS MATEMATIKA (FREKUENSI KE NADA) ===
+        function noteFromPitch(frequency) {
+            const noteNum = 12 * (Math.log(frequency / 440) / Math.log(2));
+            return Math.round(noteNum) + 69; // 69 adalah MIDI untuk A4 (440Hz)
+        }
+
+        // === ALGORITMA PENDETEKSI NADA (AUTOCORRELATION) ===
+        // Algoritma ini mencari pola gelombang berulang untuk menemukan frekuensi suara manusia
+        function autoCorrelate(buf, sampleRate) {
+            let SIZE = buf.length;
+            let rms = 0;
+            for (let i = 0; i < SIZE; i++) rms += buf[i] * buf[i];
+            rms = Math.sqrt(rms / SIZE);
+            if (rms < 0.01) return -1; // Jika suara terlalu pelan (senyap)
+
+            let r1 = 0, r2 = SIZE - 1, thres = 0.2;
+            for (let i = 0; i < SIZE / 2; i++) if (Math.abs(buf[i]) < thres) { r1 = i; break; }
+            for (let i = 1; i < SIZE / 2; i++) if (Math.abs(buf[SIZE - i]) < thres) { r2 = SIZE - i; break; }
+            
+            buf = buf.slice(r1, r2);
+            SIZE = buf.length;
+
+            let c = new Array(SIZE).fill(0);
+            for (let i = 0; i < SIZE; i++) {
+                for (let j = 0; j < SIZE - i; j++) c[i] = c[i] + buf[j] * buf[j + i];
+            }
+
+            let d = 0; while (c[d] > c[d + 1]) d++;
+            let maxval = -1, maxpos = -1;
+            for (let i = d; i < SIZE; i++) {
+                if (c[i] > maxval) { maxval = c[i]; maxpos = i; }
+            }
+            let T0 = maxpos;
+            return sampleRate / T0;
+        }
+
+        // === FUNGSI MENGGAMBAR KE CANVAS ===
+        function drawCanvas() {
+            if (!isRecording) return;
+            
+            // Bersihkan Canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            const activeChordIndexes = chords[chordSelect.value];
+            const rowHeight = canvas.height / 12; // 12 nada dalam 1 oktaf
+
+            // Gambar Background & Zona Aman (Target Chord)
+            for (let i = 0; i < 12; i++) {
+                const y = canvas.height - (i * rowHeight) - rowHeight;
+                
+                // Highlight jika nada termasuk dalam chord target
+                if (activeChordIndexes.includes(i)) {
+                    ctx.fillStyle = 'rgba(74, 222, 128, 0.2)'; // Warna hijau transparan
+                    ctx.fillRect(0, y, canvas.width, rowHeight);
+                }
+                
+                // Garis pembatas nada
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+                ctx.beginPath();
+                ctx.moveTo(0, y);
+                ctx.lineTo(canvas.width, y);
+                ctx.stroke();
+
+                // Teks Nama Nada
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+                ctx.font = '14px sans-serif';
+                ctx.fillText(notes[i], 10, y + rowHeight - 10);
+            }
+
+            // Gambar Garis Gelombang Suara
+            ctx.beginPath();
+            ctx.strokeStyle = '#38bdf8'; // Warna biru neon
+            ctx.lineWidth = 4;
+            ctx.lineJoin = 'round';
+
+            for (let i = 0; i < pitchHistory.length; i++) {
+                const pitch = pitchHistory[i];
+                const x = (i / pitchHistory.length) * canvas.width;
+                
+                if (pitch !== null && pitch > 0) {
+                    const noteNum = noteFromPitch(pitch);
+                    const noteIndex = noteNum % 12; // Cari posisi dari 0-11
+                    
+                    // Hitung posisi Y (Semakin tinggi nada, semakin ke atas grafiknya)
+                    const y = canvas.height - (noteIndex * rowHeight) - (rowHeight / 2);
+                    
+                    if (i === 0) ctx.moveTo(x, y);
+                    else ctx.lineTo(x, y);
+                }
+            }
+            ctx.stroke();
+
+            requestAnimationFrame(drawCanvas);
+        }
+
+        // === LOOP UTAMA PENDETEKSI AUDIO ===
+        function updatePitch() {
+            if (!isRecording) return;
+
+            const buffer = new Float32Array(analyser.fftSize);
+            analyser.getFloatTimeDomainData(buffer);
+            
+            const pitch = autoCorrelate(buffer, audioContext.sampleRate);
+            
+            // Geser array history ke kiri (efek scrolling)
+            pitchHistory.shift();
+            pitchHistory.push(pitch !== -1 ? pitch : null);
+
+            // Update UI Teks
+            if (pitch !== -1) {
+                const noteNum = noteFromPitch(pitch);
+                const noteName = notes[noteNum % 12];
+                noteDisplay.innerText = noteName;
+                hzDisplay.innerText = Math.round(pitch) + " Hz";
+            }
+
+            requestAnimationFrame(updatePitch);
+        }
+
+        // === KONTROL TOMBOL MIC ===
+        startBtn.addEventListener('click', async () => {
+            if (isRecording) {
+                // Matikan Mic
+                isRecording = false;
+                audioContext.close();
+                startBtn.innerText = "START MIC";
+                startBtn.classList.replace('bg-red-600', 'bg-blue-600');
+                startBtn.classList.replace('hover:bg-red-700', 'hover:bg-blue-700');
+                noteDisplay.innerText = "--";
+                hzDisplay.innerText = "0 Hz";
+                pitchHistory.fill(null);
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+            } else {
+                // Nyalakan Mic
+                try {
+                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    
+                    analyser = audioContext.createAnalyser();
+                    analyser.fftSize = 2048;
+                    
+                    microphone = audioContext.createMediaStreamSource(stream);
+                    microphone.connect(analyser);
+                    
+                    isRecording = true;
+                    startBtn.innerText = "STOP MIC";
+                    startBtn.classList.replace('bg-blue-600', 'bg-red-600');
+                    startBtn.classList.replace('hover:bg-blue-700', 'hover:bg-red-700');
+                    
+                    updatePitch(); // Jalankan loop pembaca data audio
+                    drawCanvas();  // Jalankan loop penggambar grafik
+                } catch (err) {
+                    alert("Akses mikrofon ditolak atau tidak ditemukan.");
+                    console.error(err);
+                }
+            }
+        });
+    </script>
+</body>
+</html>
