@@ -8,5 +8,5 @@ export default defineConfig({
     react(),
     tailwindcss(),
   ],
-   base: '/pitch-tuner/'
+   base: '/pitch-tunner/'
 })
